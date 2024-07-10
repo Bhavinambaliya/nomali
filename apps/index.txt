@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Packet Statistics Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Packet Statistics Dashboard</h1>
+    <button onclick="startCapture()">Start Capture</button>
+    <button onclick="stopCapture()">Stop Capture</button>
+    <div id="stats"></div>
+    <div id="plot1"></div>
+    <div id="plot2"></div>
+    <div id="plot3"></div>
+    <div id="plot4"></div>
+    <h2>Captured Packets</h2>
+    <table id="packetTable">
+        <thead>
+            <tr>
+                <th>Source IP</th>
+                <th>Destination IP</th>
+                <th>Source Port</th>
+                <th>Destination Port</th>
+                <th>Protocol</th>
+                <th>Service</th>
+                <th>Length</th>
+                <th>Info</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        function startCapture() {
+            fetch('/start_capture')
+                .then(response => response.text())
+                .then(data => {
+                    console.log(data);
+                    updateDashboard();
+                });
+        }
+
+        function stopCapture() {
+            fetch('/stop_capture')
+                .then(response => response.text())
+                .then(data => {
+                    console.log(data);
+                });
+        }
+
+        function updateDashboard() {
+            fetch('/get_stats')
+                .then(response => response.json())
+                .then(data => {
+                    let statsHtml = `<p>Mean Source Bytes: ${data.mean_src_bytes}</p>`;
+                    statsHtml += `<p>Mean Destination Bytes: ${data.mean_dst_bytes}</p>`;
+                    statsHtml += `<p>Anomalies Detected: ${data.anomaly_count}</p>`;
+                    statsHtml += `<p>Normal Packets: ${data.normal_count}</p>`;
+                    document.getElementById('stats').innerHTML = statsHtml;
+                });
+
+            fetch('/get_plots')
+                .then(response => response.json())
+                .then(data => {
+                    Plotly.newPlot('plot1', JSON.parse(data.fig1).data, JSON.parse(data.fig1).layout);
+                    Plotly.newPlot('plot2', JSON.parse(data.fig2).data, JSON.parse(data.fig2).layout);
+                    Plotly.newPlot('plot3', JSON.parse(data.fig3).data, JSON.parse(data.fig3).layout);
+                    Plotly.newPlot('plot4', JSON.parse(data.fig4).data, JSON.parse(data.fig4).layout);
+                });
+
+            fetch('/get_packets')
+                .then(response => response.json())
+                .then(data => {
+                    let tableBody = document.getElementById('packetTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = "";
+                    data.forEach(packet => {
+                        let row = tableBody.insertRow();
+                        row.insertCell(0).innerText = packet.src_ip;
+                        row.insertCell(1).innerText = packet.dst_ip;
+                        row.insertCell(2).innerText = packet.src_port;
+                        row.insertCell(3).innerText = packet.dst_port;
+                        row.insertCell(4).innerText = packet.protocol;
+                        row.insertCell(5).innerText = packet.service;
+                        row.insertCell(6).innerText = packet.length;
+                        row.insertCell(7).innerText = packet.info;
+                        row.insertCell(8).innerText = packet.status;
+                    });
+                });
+        }
+
+        setInterval(updateDashboard, 5000); // Update dashboard every 5 seconds
+    </script>
+</body>
+</html>

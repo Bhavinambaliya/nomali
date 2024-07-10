@@ -1,10 +1,13 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 from scapy.all import sniff, IP, TCP, UDP
+import signal
 import time
 
 # Correct the file path using a raw string
@@ -69,6 +72,9 @@ if 'class' in data.columns:
 else:
     print("The 'class' column is not found in the dataset. Please check the dataset.")
 
+# Create a DataFrame to store packet statistics
+packet_stats = pd.DataFrame(columns=list(X.columns) + ['prediction', 'actual'])
+
 # Function to capture live network traffic and extract packet information
 def extract_packet_info(packet):
     if IP in packet:
@@ -78,7 +84,6 @@ def extract_packet_info(packet):
             'protocol_type': 'tcp' if TCP in packet else ('udp' if UDP in packet else 'other'),  # Protocol type
             'service': ip.sport if TCP in packet or UDP in packet else 0,  # Source port
             'flag': packet.sprintf('%TCP.flags%') if packet.haslayer('TCP') else 0,
-            #packet[1].flags if TCP in packet else 0,  # TCP flags
             'src_bytes': len(packet[IP].payload),  # Source bytes
             'dst_bytes': len(packet),  # Destination bytes
             'land': int(packet[IP].src == packet[IP].dst),  # Check if source and destination are the same
@@ -102,7 +107,11 @@ def detect_anomaly(packet):
         # Normalize the data using the same scaler used for training
         packet_scaled = scaler.transform(packet_df)
         # Predict using the trained KNN model
-        prediction = knn.predict(packet_scaled)
+        prediction = knn.predict(packet_scaled)[0]
+        # Add prediction to packet info
+        packet_info['prediction'] = prediction
+        # Append packet info to packet_stats DataFrame
+        packet_stats.loc[len(packet_stats)] = packet_info
         # Check if the prediction is an anomaly
         if prediction == 1:
             print("Anomaly detected! Packet info:", packet_info)
@@ -137,10 +146,60 @@ def retrain_model():
             print(confusion_matrix(new_y_test, new_y_pred))
             print(classification_report(new_y_test, new_y_pred))
 
+# Signal handler to gracefully stop the packet capture
+def signal_handler(sig, frame):
+    print('Stopping live capture...')
+    global running
+    running = False
+
+signal.signal(signal.SIGINT, signal_handler)
+
 # Ensure the models are trained before starting live capture
 if 'class' in data.columns:
     print("Starting live capture...")
-    sniff(prn=detect_anomaly, store=0)
-    retrain_model()
+    global running
+    running = True
+    while running:
+        sniff(prn=detect_anomaly, store=0, count=1)
+    print("Packet Statistics:")
+    print(packet_stats)
+
+    # Calculate statistics
+    mean_src_bytes = packet_stats['src_bytes'].mean()
+    mean_dst_bytes = packet_stats['dst_bytes'].mean()
+    anomaly_count = packet_stats['prediction'].sum()
+    normal_count = len(packet_stats) - anomaly_count
+
+    print(f"Mean src_bytes: {mean_src_bytes}")
+    print(f"Mean dst_bytes: {mean_dst_bytes}")
+    print(f"Anomalies detected: {anomaly_count}")
+    print(f"Normal packets: {normal_count}")
+
+    # Visualization
+    plt.figure(figsize=(14, 7))
+
+    # Subplot 1: src_bytes distribution
+    plt.subplot(2, 2, 1)
+    sns.histplot(packet_stats['src_bytes'], kde=True)
+    plt.title('Source Bytes Distribution')
+
+    # Subplot 2: dst_bytes distribution
+    plt.subplot(2, 2, 2)
+    sns.histplot(packet_stats['dst_bytes'], kde=True)
+    plt.title('Destination Bytes Distribution')
+
+    # Subplot 3: Prediction count
+    plt.subplot(2, 2, 3)
+    sns.countplot(x='prediction', data=packet_stats)
+    plt.title('Prediction Count')
+    plt.xticks(ticks=[0, 1], labels=['Normal', 'Anomaly'])
+
+    # Subplot 4: src_bytes vs. dst_bytes
+    plt.subplot(2, 2, 4)
+    sns.scatterplot(x='src_bytes', y='dst_bytes', hue='prediction', data=packet_stats, palette={0: 'blue', 1: 'red'})
+    plt.title('Source Bytes vs. Destination Bytes')
+
+    plt.tight_layout()
+    plt.show()
 else:
     print("Training data is not correctly loaded.")
